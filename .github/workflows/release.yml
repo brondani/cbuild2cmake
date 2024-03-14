@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
 
       - name: Install Go
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
@@ -23,13 +25,12 @@ jobs:
 
       - name: Generate release notes
         run: |
-          git fetch --unshallow
           ./scripts/release_notes > /tmp/RELEASE_NOTES
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 # v5.0.0
         with:
           version: latest
-          args: release --rm-dist --release-notes=/tmp/RELEASE_NOTES
+          args: release ${{ github.event_name != 'push' && '--snapshot' || '' }} --clean --release-notes=/tmp/RELEASE_NOTES
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
