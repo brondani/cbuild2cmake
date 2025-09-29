@@ -40,7 +40,7 @@ func (m *Maker) CreateContextCMakeLists(index int) error {
 	}
 
 	// Create toolchain.cmake
-	err := m.CMakeCreateToolchain(index, contextDir)
+	err := m.CMakeCreateToolchain(index, contextDir, true)
 	if err != nil {
 		return err
 	}
@@ -161,14 +161,18 @@ include("components.cmake")
 	return err
 }
 
-func (m *Maker) CMakeCreateToolchain(index int, contextDir string) error {
+func (m *Maker) CMakeCreateToolchain(index int, contextDir string, inc bool) error {
 	toolchainConfig, _ := filepath.Rel(m.EnvVars.CompilerRoot, m.SelectedToolchainConfig[index])
 	toolchainConfig = "${CMSIS_COMPILER_ROOT}/" + filepath.ToSlash(toolchainConfig)
+	var include string
+	if inc {
+		include = "include(\"" + toolchainConfig + "\")\n"
+	}
 	content := `# toolchain.cmake
 
 set(REGISTERED_TOOLCHAIN_ROOT "` + m.RegisteredToolchains[m.SelectedToolchainVersion[index]].Path + `")
 set(REGISTERED_TOOLCHAIN_VERSION "` + m.SelectedToolchainVersion[index].String() + `")
-include("` + toolchainConfig + `")
+` + include + `
 `
 	filename := path.Join(contextDir, "toolchain.cmake")
 	err := utils.UpdateFile(filename, content)
@@ -368,4 +372,96 @@ func (c *Cbuild) GetLinkLibraries() (libraries []string) {
 		libraries = append(libraries, "-Wl,--end-group")
 	}
 	return
+}
+
+var WestToolchainMap = map[string]string{
+	"AC6":   "armclang",
+	"GCC":   "gnuarmemb",
+	"IAR":   "iar",
+	"CLANG": "llvm",
+}
+
+func (m *Maker) CreateWestCMakeLists(index int) error {
+	cbuild := &m.Cbuilds[index]
+	cbuild.ContextRoot, _ = filepath.Rel(m.SolutionRoot, cbuild.BaseDir)
+	cbuild.ContextRoot = filepath.ToSlash(cbuild.ContextRoot)
+	cbuild.Toolchain = m.RegisteredToolchains[m.SelectedToolchainVersion[index]].Name
+	outDir := cbuild.AddRootPrefix(cbuild.ContextRoot, cbuild.BuildDescType.OutputDirs.Outdir)
+	contextDir := path.Join(m.SolutionTmpDir, cbuild.BuildDescType.Context)
+	westApp := cbuild.AddRootPrefix(cbuild.ContextRoot, cbuild.BuildDescType.West.AppPath)
+	westToolchain := WestToolchainMap[cbuild.BuildDescType.Compiler]
+
+	var westOptions, westDefs string
+	var westOptionsRef, westDefsRef string
+	for _, opt := range cbuild.BuildDescType.West.WestOpt {
+		westOptions += "\n  " + opt
+	}
+	if len(westOptions) > 0 {
+		westOptions = "\nset(WEST_OPTIONS" + westOptions + "\n)"
+		westOptionsRef = " ${WEST_OPTIONS}"
+	}
+
+	for _, define := range cbuild.BuildDescType.West.WestDefs {
+		key, value := utils.GetDefine(define)
+		def := key
+		if len(value) > 0 {
+			def += "=" + value
+		}
+		westDefs += "\n  -D" + def
+	}
+	if len(westDefs) > 0 {
+		westDefs = "\nset(WEST_DEFS" + westDefs + "\n)"
+		westDefsRef = " -- ${WEST_DEFS}"
+	}
+
+	// Create toolchain.cmake
+	err := m.CMakeCreateToolchain(index, contextDir, false)
+	if err != nil {
+		return err
+	}
+
+	// Create CMakeLists content
+	content := `cmake_minimum_required(VERSION 3.27)
+
+# Roots
+include("../roots.cmake")
+
+set(CONTEXT ` + strings.ReplaceAll(cbuild.BuildDescType.Context, " ", "_") + `)
+set(TARGET ${CONTEXT})
+set(OUT_DIR "` + outDir + `")
+set(WEST_BOARD "` + cbuild.BuildDescType.West.Board + `")
+set(WEST_APP "` + westApp + `")
+
+# Toolchain config map
+include("toolchain.cmake")
+
+# Environment variables
+set(ZEPHYR_TOOLCHAIN_PATH "${REGISTERED_TOOLCHAIN_ROOT}/..")
+cmake_path(ABSOLUTE_PATH ZEPHYR_TOOLCHAIN_PATH NORMALIZE OUTPUT_VARIABLE ZEPHYR_TOOLCHAIN_PATH)
+set(ENV{` + strings.ToUpper(westToolchain) + `_TOOLCHAIN_PATH} ${ZEPHYR_TOOLCHAIN_PATH})
+set(ENV{ZEPHYR_TOOLCHAIN_VARIANT} "` + westToolchain + `")
+
+# Setup project
+project(${CONTEXT} LANGUAGES NONE)
+` + westOptions + westDefs + `
+
+# Compilation database
+add_custom_target(database
+  COMMAND west build -b ${WEST_BOARD} -d "${OUT_DIR}" -p auto --cmake-only` + westOptionsRef + ` "${WEST_APP}"` + westDefsRef + `
+  USES_TERMINAL
+)
+
+# West build
+add_custom_target(west
+  COMMAND west build -b ${WEST_BOARD} -d "${OUT_DIR}" -p auto` + westOptionsRef + ` "${WEST_APP}"` + westDefsRef + `
+  USES_TERMINAL
+)
+`
+	// Update CMakeLists.txt
+	contextCMakeLists := path.Join(contextDir, "CMakeLists.txt")
+	err = utils.UpdateFile(contextCMakeLists, content)
+	if err != nil {
+		return err
+	}
+	return err
 }
