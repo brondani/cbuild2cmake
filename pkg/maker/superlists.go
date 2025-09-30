@@ -20,11 +20,13 @@ const CMAKE_MIN_REQUIRED = "3.27"
 
 func (m *Maker) CreateSuperCMakeLists() error {
 	// Iterate over cbuilds
-	var contexts, dirs, wests, contextOutputs string
+	var contexts, dirs, westContextFlags, contextOutputs string
+	west := false
 	for i, cbuild := range m.Cbuilds {
 		contexts = contexts + "  \"" + strings.ReplaceAll(cbuild.BuildDescType.Context, " ", "_") + "\"\n"
 		dirs = dirs + "  \"${CMAKE_CURRENT_SOURCE_DIR}/" + cbuild.BuildDescType.Context + "\"\n"
-		wests = wests + "  \"" + strconv.FormatBool(cbuild.BuildDescType.West.AppPath != "") + "\"\n"
+		west = west || (cbuild.BuildDescType.West.AppPath != "")
+		westContextFlags = westContextFlags + "  \"" + strconv.FormatBool(west) + "\"\n"
 
 		var contextOutputsName = "OUTPUTS_" + strconv.Itoa(i+1)
 		contextOutputs += "\nset(" + contextOutputsName + "\n"
@@ -42,10 +44,10 @@ func (m *Maker) CreateSuperCMakeLists() error {
 		contextOutputs += ")"
 	}
 
-	var westContextCheck, westTarget string
-	if wests != "" {
-		wests = "\nset(WEST_CONTEXTS\n" + wests + ")\n"
-		westContextCheck = "  list(GET WEST_CONTEXTS ${INDEX} WEST_CONTEXT)\n  if(WEST_CONTEXT)\n    set(WEST_TARGET \"--target west\")\n  endif()"
+	var westContexts, westContextCheck, westTarget string
+	if west {
+		westContexts = "\nset(WEST_CONTEXTS\n" + westContextFlags + ")\n"
+		westContextCheck = "\n  list(GET WEST_CONTEXTS ${INDEX} WEST_CONTEXT)\n  if(WEST_CONTEXT)\n    set(WEST_TARGET \"--target west\")\n  endif()"
 		westTarget = " ${WEST_TARGET}"
 	}
 
@@ -76,7 +78,7 @@ math(EXPR CONTEXTS_LENGTH "${CONTEXTS_LENGTH}-1")
 
 set(DIRS
 ` + dirs + `)
-` + wests + contextOutputs + `
+` + westContexts + contextOutputs + `
 
 set(ARGS
   "-DSOLUTION_ROOT=${SOLUTION_ROOT}"
@@ -92,8 +94,7 @@ foreach(INDEX RANGE ${CONTEXTS_LENGTH})
 
   math(EXPR N "${INDEX}+1")
   list(GET CONTEXTS ${INDEX} CONTEXT)
-  list(GET DIRS ${INDEX} DIR)
-` + westContextCheck + `
+  list(GET DIRS ${INDEX} DIR)` + westContextCheck + `
 
   # Create external project, set configure and build steps
   ExternalProject_Add(${CONTEXT}

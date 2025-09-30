@@ -435,25 +435,27 @@ set(WEST_APP "` + westApp + `")
 # Toolchain config map
 include("toolchain.cmake")
 
-# Environment variables
-set(ZEPHYR_TOOLCHAIN_PATH "${REGISTERED_TOOLCHAIN_ROOT}/..")
-cmake_path(ABSOLUTE_PATH ZEPHYR_TOOLCHAIN_PATH NORMALIZE OUTPUT_VARIABLE ZEPHYR_TOOLCHAIN_PATH)
-set(ENV{` + strings.ToUpper(westToolchain) + `_TOOLCHAIN_PATH} ${ZEPHYR_TOOLCHAIN_PATH})
-set(ENV{ZEPHYR_TOOLCHAIN_VARIANT} "` + westToolchain + `")
-
 # Setup project
 project(${CONTEXT} LANGUAGES NONE)
 ` + westOptions + westDefs + `
 
+# Environment variables
+set(ZEPHYR_TOOLCHAIN_PATH "${REGISTERED_TOOLCHAIN_ROOT}/..")
+cmake_path(ABSOLUTE_PATH ZEPHYR_TOOLCHAIN_PATH NORMALIZE OUTPUT_VARIABLE ZEPHYR_TOOLCHAIN_PATH)
+set(ENV_VARS
+  ` + strings.ToUpper(westToolchain) + `_TOOLCHAIN_PATH="${ZEPHYR_TOOLCHAIN_PATH}"
+  ZEPHYR_TOOLCHAIN_VARIANT="` + westToolchain + `"
+)
+
 # Compilation database
 add_custom_target(database
-  COMMAND west build -b ${WEST_BOARD} -d "${OUT_DIR}" -p auto --cmake-only` + westOptionsRef + ` "${WEST_APP}"` + westDefsRef + `
+  COMMAND cmake -E env ${ENV_VARS} west build -b ${WEST_BOARD} -d "${OUT_DIR}" -p auto --cmake-only` + westOptionsRef + ` "${WEST_APP}"` + westDefsRef + `
   USES_TERMINAL
 )
 
 # West build
 add_custom_target(west
-  COMMAND west build -b ${WEST_BOARD} -d "${OUT_DIR}" -p auto` + westOptionsRef + ` "${WEST_APP}"` + westDefsRef + `
+  COMMAND cmake -E env ${ENV_VARS} west build -b ${WEST_BOARD} -d "${OUT_DIR}" -p auto` + westOptionsRef + ` "${WEST_APP}"` + westDefsRef + `
   USES_TERMINAL
 )
 `
